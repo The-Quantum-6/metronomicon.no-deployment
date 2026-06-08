@@ -27,7 +27,7 @@
         };
 
         backend = {
-          image = "jobau8311/metronimicon-backend";
+          image = "jobau8311/metronimicon-backend:candidate";
           user = "999:999";
           environmentFiles = [ "/run/agenix/.env" ];
           ports = [ "3000:3000" ];
@@ -37,7 +37,7 @@
         };
 
         frontend = {
-          image = "jobau8311/metronimicon-frontend";
+          image = "jobau8311/metronimicon-frontend:candidate";
           user = "999:999";
           environmentFiles = [ "/run/agenix/.env" ];
           ports = [ "8080:80" ];
