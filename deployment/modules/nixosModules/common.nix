@@ -38,7 +38,6 @@
 
         frontend = {
           image = "jobau8311/metronomicon-frontend:candidate";
-          user = "999:999";
           environmentFiles = [ "/run/agenix/.env" ];
           ports = [ "8080:80" ];
           pull = "always";
