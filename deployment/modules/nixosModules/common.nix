@@ -1,5 +1,5 @@
 { self, inputs, ... }: {
-  flake.nixosModules.common = { config, ... }: {
+  flake.nixosModules.common = { config, pkgs, lib, ... }: {
     imports = with self.nixosModules; [
       bootstrap
       secrets
