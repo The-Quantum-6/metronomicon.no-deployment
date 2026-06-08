@@ -8,23 +8,81 @@
       ssh-root
     ];
 
-    # Example config of docker container
+    virtualisation.podman.enable = true;
+
     virtualisation.oci-containers = {
       backend = "podman";
-      containers.envtest = {
-        user = "999:999";
-        image = "mendhak/http-https-echo:40";
-        environmentFiles = [ "/run/agenix/.env" ]; # Secrets available at /run/agenix/.env
-        ports = [ "80:8080" "443:8443" ];
-        pull = "newer";
+      containers = {
+        db = {
+          image = "postgres:18";
+          environmentFiles = [ "/run/agenix/.env" ];
+          volumes = [ "db_data:/var/lib/postgresql/18/docker" ];
+          extraOptions = [
+            "--network=appnet"
+            "--health-cmd=pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+            "--health-interval=10s"
+            "--health-timeout=5s"
+            "--health-retries=5"
+          ];
+        };
+
+        backend = {
+          image = "jobau8311/metronimicon-backend";
+          user = "999:999";
+          environmentFiles = [ "/run/agenix/.env" ];
+          ports = [ "3000:3000" ];
+          pull = "newer";
+          dependsOn = [ "db" ];
+          extraOptions = [ "--network=appnet" ];
+        };
+
+        frontend = {
+          image = "jobau8311/metronimicon-frontend";
+          user = "999:999";
+          environmentFiles = [ "/run/agenix/.env" ];
+          ports = [ "8080:80" ];
+          pull = "newer";
+          dependsOn = [ "backend" ];
+          extraOptions = [ "--network=appnet" ];
+        };
       };
     };
 
-    systemd.services."podman-envtest" = {
-      after = [ "agenix.service" ]; # Wait until agenix is finished
-      wants = [ "agenix.service" ];
-      restartTriggers = [ config.age.secrets.".env".file ]; # This is required for the container to restart when a secret is changed or added
+    services.caddy = {
+      enable = true;
+      virtualHosts."metronomicon.no".extraConfig = ''
+        handle /api/* {
+          reverse_proxy localhost:3000
+        }
+        reverse_proxy localhost:8080
+      '';
     };
+
+    systemd.services = lib.mkMerge [
+      {
+        # User-defined network so containers resolve each other by name
+        # (db, backend, frontend), like the compose default network did.
+        create-appnet = {
+          serviceConfig.Type = "oneshot";
+          wantedBy = [ "multi-user.target" ];
+          before = [
+            "podman-db.service"
+            "podman-backend.service"
+            "podman-frontend.service"
+          ];
+          script = ''
+            ${pkgs.podman}/bin/podman network exists appnet \
+              || ${pkgs.podman}/bin/podman network create appnet
+          '';
+        };
+      }
+      # agenix ordering + restart-on-secret-change for all three containers
+      (lib.genAttrs [ "podman-db" "podman-backend" "podman-frontend" ] (_: {
+        after = [ "agenix.service" "create-appnet.service" ];
+        wants = [ "agenix.service" ];
+        restartTriggers = [ config.age.secrets.".env".file ];
+      }))
+    ];
 
     networking.firewall.allowedTCPPorts = [ 80 443 ];
   };
