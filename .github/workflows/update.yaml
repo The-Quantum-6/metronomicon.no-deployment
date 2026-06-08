@@ -1,0 +1,94 @@
+name: Update host
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: environment
+        description: 'Deployment environment'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+    env:
+      TARGET_HOST: ${{ inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check required vars and secrets
+        uses: ./.github/actions/check-vars
+        with:
+          target-host: ${{ inputs.environment }}
+          ssh-root-key: ${{ secrets.SSH_ROOT_KEY }}
+          ssh-agenix-key: ${{ secrets.SSH_AGENIX_KEY }}
+          ip-address: ${{ secrets.IP_ADDRESS }}
+          vars-json: ${{ toJSON(vars) }}
+          secrets-json: ${{ toJSON(secrets) }}
+
+      - name: Validate host state
+        run: |
+          set -euo pipefail
+          host_dir="deployment/modules/hosts/$TARGET_HOST"
+          if [[ ! -f "$host_dir/configuration.nix" || ! -f "$host_dir/_hardware-configuration.nix" ]]; then
+            echo "ERROR: Host '$TARGET_HOST' is not bootstrapped yet. Run the bootstrap workflow first."
+            exit 1
+          fi
+          if grep -Eq '^[[:space:]]*bootstrap' "$host_dir/configuration.nix"; then
+            echo "ERROR: Host '$TARGET_HOST' is still using the bootstrap configuration."
+            exit 1
+          fi
+          if ! grep -Eq '^[[:space:]]*common' "$host_dir/configuration.nix"; then
+            echo "ERROR: Host '$TARGET_HOST' configuration is missing the common module."
+            exit 1
+          fi
+          if ! grep -q "root@$TARGET_HOST" deployment/secrets/keys.nix; then
+            echo "ERROR: Host '$TARGET_HOST' does not have an agenix key registered."
+            exit 1
+          fi
+
+      - name: Set up Nix, SSH, and git
+        uses: ./.github/actions/setup-deploy
+        with:
+          ip-address: ${{ secrets.IP_ADDRESS }}
+          ssh-root-key: ${{ secrets.SSH_ROOT_KEY }}
+          ssh-agenix-key: ${{ secrets.SSH_AGENIX_KEY }}
+
+      - name: Encrypt secrets with agenix
+        uses: ./.github/actions/encrypt-secrets
+        with:
+          vars-json: ${{ toJSON(vars) }}
+          secrets-json: ${{ toJSON(secrets) }}
+
+      - name: Commit encrypted secrets
+        run: |
+          git add .
+          git commit -m "actions($TARGET_HOST): Update encrypted secrets for $TARGET_HOST"
+
+      - name: Push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push
+
+      - name: Resolve deployment ref
+        id: deployment_ref
+        run: |
+          set -euo pipefail
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild host to finished config
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.IP_ADDRESS }}
+          username: root
+          key: ${{ secrets.SSH_ROOT_KEY }}
+          script: |
+            set -euo pipefail
+            nixos-rebuild switch --show-trace --flake github:${{ github.repository }}/${{ steps.deployment_ref.outputs.ref }}?dir=deployment#${{ inputs.environment }}

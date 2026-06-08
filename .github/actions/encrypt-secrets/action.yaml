@@ -1,0 +1,74 @@
+name: 'Encrypt secrets with agenix'
+description: >
+  Renders the .env template by substituting ${vars.*} / ${secrets.*} placeholders,
+  fails if any placeholder is left unresolved, and encrypts the result to .env.age
+  using agenix. Requires Nix and the agenix SSH key (run setup-deploy first).
+
+inputs:
+  vars-json:
+    description: 'All vars as JSON, i.e. toJSON(vars)'
+    required: true
+  secrets-json:
+    description: 'All secrets as JSON, i.e. toJSON(secrets)'
+    required: true
+  template:
+    description: 'Path to the .env template'
+    required: false
+    default: 'deployment/.env.template'
+  secrets-dir:
+    description: 'Directory the encrypted .env.age is written to (where secrets.nix lives)'
+    required: false
+    default: 'deployment/secrets'
+  agenix-key:
+    description: 'Path to the SSH identity agenix encrypts with'
+    required: false
+    default: '~/.ssh/agenix'
+
+runs:
+  using: 'composite'
+  steps:
+    - shell: bash
+      env:
+        ALL_VARS: ${{ inputs.vars-json }}
+        ALL_SECRETS: ${{ inputs.secrets-json }}
+        TEMPLATE: ${{ inputs.template }}
+        SECRETS_DIR: ${{ inputs.secrets-dir }}
+        AGENIX_KEY_INPUT: ${{ inputs.agenix-key }}
+      run: |
+        set -euo pipefail
+
+        # Expand a leading ~ in the key path (a quoted "$VAR" tilde would not expand).
+        AGENIX_KEY="${AGENIX_KEY_INPUT/#\~/$HOME}"
+        SECRETS_DIR_ABS="$(cd "$SECRETS_DIR" && pwd)"
+        RENDERED="$(mktemp)"
+
+        cp "$TEMPLATE" "$RENDERED"
+
+        # Replace ${vars.KEY} from ALL_VARS
+        jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<< "$ALL_VARS" | \
+        while IFS=$'\t' read -r k v; do
+          sed -i "s|\${vars\.${k}}|${v}|g" "$RENDERED"
+        done
+
+        # Replace ${secrets.KEY} from ALL_SECRETS
+        jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<< "$ALL_SECRETS" | \
+        while IFS=$'\t' read -r k v; do
+          sed -i "s|\${secrets\.${k}}|${v}|g" "$RENDERED"
+        done
+
+        if grep -qE '\$\{(vars|secrets)\.[A-Za-z0-9_]+}' "$RENDERED"; then
+          echo "ERROR: Unresolved placeholders remain in rendered .env:"
+          grep -oE '\$\{(vars|secrets)\.[A-Za-z0-9_]+}' "$RENDERED" | sort -u
+          shred -u "$RENDERED"
+          exit 1
+        fi
+
+        cd "$SECRETS_DIR_ABS"
+        rm -f .env.age # In case it has been committed
+        nix run github:ryantm/agenix -- -e .env.age -i "$AGENIX_KEY" < "$RENDERED"
+        shred -u "$RENDERED"
+
+        if [[ ! -s .env.age ]]; then
+          echo "ERROR: .env.age was not created or is empty" && exit 1
+        fi
+        echo "Successfully created .env.age ($(wc -c < .env.age) bytes)"

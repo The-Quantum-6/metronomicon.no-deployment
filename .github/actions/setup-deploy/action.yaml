@@ -1,0 +1,56 @@
+name: 'Set up deployment runner'
+description: 'Installs Nix, writes the root + agenix SSH keys, and configures the git identity.'
+
+inputs:
+  ip-address:
+    description: 'Target host IPv4 address (used for the known_hosts scan)'
+    required: true
+  ssh-root-key:
+    description: 'Root SSH private key (secrets.SSH_ROOT_KEY)'
+    required: true
+  ssh-agenix-key:
+    description: 'Agenix SSH private key (secrets.SSH_AGENIX_KEY)'
+    required: true
+  nix-path:
+    description: 'nix_path passed to install-nix-action'
+    required: false
+    default: 'nixpkgs=channel:nixos-25.11'
+  git-user-name:
+    description: 'git user.name'
+    required: false
+    default: 'github-actions[bot]'
+  git-user-email:
+    description: 'git user.email'
+    required: false
+    default: 'github-actions[bot]@users.noreply.github.com'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Nix
+      uses: cachix/install-nix-action@v31
+      with:
+        nix_path: ${{ inputs.nix-path }}
+
+    - name: Setup SSH keys
+      shell: bash
+      env:
+        IP_ADDRESS: ${{ inputs.ip-address }}
+        SSH_ROOT_KEY: ${{ inputs.ssh-root-key }}
+        SSH_AGENIX_KEY: ${{ inputs.ssh-agenix-key }}
+      run: |
+        mkdir -p ~/.ssh
+        echo "$SSH_ROOT_KEY" > ~/.ssh/ed25519
+        chmod 600 ~/.ssh/ed25519
+        ssh-keyscan -H "$IP_ADDRESS" >> ~/.ssh/known_hosts
+        echo "$SSH_AGENIX_KEY" > ~/.ssh/agenix
+        chmod 600 ~/.ssh/agenix
+
+    - name: Configure git
+      shell: bash
+      env:
+        GIT_USER_NAME: ${{ inputs.git-user-name }}
+        GIT_USER_EMAIL: ${{ inputs.git-user-email }}
+      run: |
+        git config user.name "$GIT_USER_NAME"
+        git config user.email "$GIT_USER_EMAIL"

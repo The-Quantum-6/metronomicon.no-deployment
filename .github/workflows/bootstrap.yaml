@@ -1,0 +1,145 @@
+name: Bootstrap host
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: environment
+        description: 'Deployment environment'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+    env:
+      TARGET_HOST: ${{ inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check required vars and secrets
+        uses: ./.github/actions/check-vars
+        with:
+          target-host: ${{ inputs.environment }}
+          ssh-root-key: ${{ secrets.SSH_ROOT_KEY }}
+          ssh-agenix-key: ${{ secrets.SSH_AGENIX_KEY }}
+          ip-address: ${{ secrets.IP_ADDRESS }}
+          vars-json: ${{ toJSON(vars) }}
+          secrets-json: ${{ toJSON(secrets) }}
+
+      - name: Validate bootstrap state
+        run: |
+          set -euo pipefail
+          host_dir="deployment/modules/hosts/$TARGET_HOST"
+          if [[ -e "$host_dir" ]]; then
+            echo "ERROR: Host '$TARGET_HOST' already exists. Bootstrap should only run once per host."
+            exit 1
+          fi
+          if grep -q "root@$TARGET_HOST" deployment/secrets/keys.nix; then
+            echo "ERROR: Host '$TARGET_HOST' already has an agenix key registered."
+            exit 1
+          fi
+
+      - name: Set up Nix, SSH, and git
+        uses: ./.github/actions/setup-deploy
+        with:
+          ip-address: ${{ secrets.IP_ADDRESS }}
+          ssh-root-key: ${{ secrets.SSH_ROOT_KEY }}
+          ssh-agenix-key: ${{ secrets.SSH_AGENIX_KEY }}
+
+      - name: Create host config from bootstrap template
+        run: |
+          mkdir -p deployment/modules/hosts/$TARGET_HOST
+
+          sed -e '/^[[:space:]]*#/d' \
+            -e "s/bootstrapConfig/$TARGET_HOST/" \
+            deployment/modules/hosts/bootstrap/configuration.nix > deployment/modules/hosts/$TARGET_HOST/configuration.nix
+
+      - name: Commit host config
+        run: |
+          git add .
+          git commit -m "actions($TARGET_HOST): Add bootstrap configuration for $TARGET_HOST"
+
+      - name: Run nixos-anywhere
+        run: |
+          nix run github:nix-community/nixos-anywhere \
+            -- --generate-hardware-config nixos-generate-config ./deployment/modules/hosts/$TARGET_HOST/_hardware-configuration.nix \
+            --flake ./deployment#$TARGET_HOST \
+            --target-host root@${{ secrets.IP_ADDRESS }} \
+            -i ~/.ssh/ed25519
+
+      - name: Commit hardware configuration
+        run: |
+          git add .
+          git commit -m "actions($TARGET_HOST): Add hardware configuration for $TARGET_HOST"
+
+      - name: Re-scan host SSH key after nixos-anywhere
+        run: |
+          ssh-keygen -R ${{ secrets.IP_ADDRESS }}
+          until ssh-keyscan -H ${{ secrets.IP_ADDRESS }} 2>/dev/null | grep -q 'ssh-ed25519'; do
+            echo "Waiting for sshd..."; sleep 5
+          done
+
+      - name: Add host ssh key to agenix keys
+        run: |
+          NEW_KEY="$(ssh-keyscan -t ed25519 ${{ secrets.IP_ADDRESS }} 2>/dev/null \
+            | grep 'ssh-ed25519' \
+            | awk '{print $2, $3}' \
+            | tr -d '\n') root@$TARGET_HOST"
+
+          if [[ -z "$NEW_KEY" ]]; then
+            echo "ERROR: Failed to fetch host key" && exit 1
+          fi
+          sed -i "s|^]|  \"${NEW_KEY}\" # $TARGET_HOST\n]|" deployment/secrets/keys.nix
+
+      - name: Commit agenix key changes
+        run: |
+          git add .
+          git commit -m "actions($TARGET_HOST): Add $TARGET_HOST ssh key to agenix keys"
+
+      - name: Encrypt secrets with agenix
+        uses: ./.github/actions/encrypt-secrets
+        with:
+          vars-json: ${{ toJSON(vars) }}
+          secrets-json: ${{ toJSON(secrets) }}
+
+      - name: Commit encrypted secrets
+        run: |
+          git add .
+          git commit -m "actions($TARGET_HOST): Add encrypted secrets for $TARGET_HOST"
+
+      - name: Swap bootstrapped host to common config
+        run: |
+          sed -i '/#/! s/\bbootstrap\b/common/' deployment/modules/hosts/$TARGET_HOST/configuration.nix
+
+      - name: Commit config finalization
+        run: |
+          git add .
+          git commit -m "actions($TARGET_HOST): Swap $TARGET_HOST config to common(final) config"
+
+      - name: Push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push
+
+      - name: Resolve deployment ref
+        id: deployment_ref
+        run: |
+          set -euo pipefail
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild host to finished config
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.IP_ADDRESS }}
+          username: root
+          key: ${{ secrets.SSH_ROOT_KEY }}
+          script: |
+            set -euo pipefail
+            nixos-rebuild switch --show-trace --flake github:${{ github.repository }}/${{ steps.deployment_ref.outputs.ref }}?dir=deployment#${{ inputs.environment }}
