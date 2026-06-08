@@ -31,7 +31,7 @@
           user = "999:999";
           environmentFiles = [ "/run/agenix/.env" ];
           ports = [ "3000:3000" ];
-          pull = "newer";
+          pull = "always";
           dependsOn = [ "db" ];
           extraOptions = [ "--network=appnet" ];
         };
@@ -41,7 +41,7 @@
           user = "999:999";
           environmentFiles = [ "/run/agenix/.env" ];
           ports = [ "8080:80" ];
-          pull = "newer";
+          pull = "always";
           dependsOn = [ "backend" ];
           extraOptions = [ "--network=appnet" ];
         };
