@@ -6,7 +6,7 @@
     };
 
     users.users.root.openssh.authorizedKeys.keys = [
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOqVpl7w1HPMm5GPqTAMXKbBdPEiRZzMPqHwWI9EtoyT" # Bootstrap key
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPHdCri0n+rL2Ziajo1qRNDWXS0G/Jh3hZdj8waE9uhH" # Bootstrap key
     ];
   };
 }
