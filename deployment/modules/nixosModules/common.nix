@@ -50,10 +50,12 @@
     services.caddy = {
       enable = true;
       virtualHosts."metronomicon.no".extraConfig = ''
-        handle /api/* {
+        handle_path /api/* {
           reverse_proxy localhost:3000
         }
-        reverse_proxy localhost:8080
+        handle {
+          reverse_proxy localhost:8080
+        }
       '';
     };
 
