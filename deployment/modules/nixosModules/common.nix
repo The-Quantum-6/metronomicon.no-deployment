@@ -31,7 +31,7 @@
           user = "999:999";
           environmentFiles = [ "/run/agenix/.env" ];
           ports = [ "3000:3000" ];
-          pull = "always";
+          pull = "newer";
           dependsOn = [ "db" ];
           extraOptions = [ "--network=appnet" ];
         };
@@ -40,7 +40,7 @@
           image = "jobau8311/metronomicon-frontend:candidate";
           environmentFiles = [ "/run/agenix/.env" ];
           ports = [ "8080:80" ];
-          pull = "always";
+          pull = "newer";
           dependsOn = [ "backend" ];
           extraOptions = [ "--network=appnet" ];
         };
