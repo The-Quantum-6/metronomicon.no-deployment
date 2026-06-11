@@ -27,6 +27,7 @@
           containers = {
             db = {
               image = "postgres:18";
+              podman.sdnotify = "healthy";
               environmentFiles = [ "/run/agenix/.env" ];
               volumes = [ "db_data:/var/lib/postgresql/18/docker" ];
               extraOptions = [
