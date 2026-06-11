@@ -16,13 +16,13 @@ jobs:
 
       - name: Pull candidate images
         run: |
-          docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT_NAME }}-backend:candidate
-          docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT_NAME }}-frontend:candidate
+          docker pull jobau8311/metronomicon-backend:candidate
+          docker pull jobau8311/metronomicon-frontend:candidate
 
       - name: Promote to stable
         run: |
-          docker tag ${{ secrets.DOCKERHUB_PROJECT_NAME }}-backend:candidate ${{ secrets.DOCKERHUB_PROJECT_NAME }}-backend:stable
-          docker tag ${{ secrets.DOCKERHUB_PROJECT_NAME }}-frontend:candidate ${{ secrets.DOCKERHUB_PROJECT_NAME }}-frontend:stable
+          docker tag jobau8311/metronomicon-backend:candidate jobau8311/metronomicon-backend:stable
+          docker tag jobau8311/metronomicon-frontend:candidate jobau8311/metronomicon-frontend:stable
 
-          docker push ${{ secrets.DOCKERHUB_PROJECT_NAME }}-backend:stable
-          docker push ${{ secrets.DOCKERHUB_PROJECT_NAME }}-frontend:stable
+          docker push jobau8311/metronomicon-backend:stable
+          docker push jobau8311/metronomicon-frontend:stable
